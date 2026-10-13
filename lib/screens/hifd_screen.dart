@@ -98,6 +98,7 @@ class _HifdScreenState extends ConsumerState<HifdScreen> {
               grade: result['grade'] as int,
             ),
           );
+      ref.invalidate(reportDataProvider);
       if (!mounted) return;
       AppSnack.success(context, 'تم حفظ التحفيظ');
     } on AppException catch (error) {
@@ -489,6 +490,7 @@ class _HifdEntrySheetState extends State<HifdEntrySheet> {
   int _ayahFrom = 1;
   int _surahTo = _defaultSurah;
   int _ayahTo = 1;
+  bool _fullSurah = false;
   int _grade = 3;
   bool _ready = false;
 
@@ -499,7 +501,14 @@ class _HifdEntrySheetState extends State<HifdEntrySheet> {
     super.initState();
     _syncFromExisting();
     _catalog.ensureLoaded().then((_) {
-      if (mounted) setState(() => _ready = _catalog.error == null);
+      if (!mounted) return;
+      setState(() {
+        _fullSurah = widget.existingEntries.isNotEmpty &&
+            widget.existingEntries.first.isFullSurah(
+              _catalog.ayahCountOf(widget.existingEntries.first.surahFrom),
+            );
+        _ready = _catalog.error == null;
+      });
     });
   }
 
@@ -517,26 +526,67 @@ class _HifdEntrySheetState extends State<HifdEntrySheet> {
   void _setFromSurah(int surah) {
     setState(() {
       _surahFrom = surah;
+      _surahTo = surah;
       _ayahFrom = 1;
-      if (surah < _surahTo) {
-        _surahTo = surah;
-        _ayahTo = 1;
-      }
+      _ayahTo = _fullSurah ? _catalog.ayahCountOf(surah) : 1;
     });
   }
 
   void _setToSurah(int surah) {
     setState(() {
-      _surahTo = surah;
+      _surahTo = surah < _surahFrom ? _surahFrom : surah;
+      _fullSurah = false;
       _ayahTo = 1;
+      if (_surahTo == _surahFrom && _ayahTo < _ayahFrom) {
+        _ayahTo = _ayahFrom;
+      }
+    });
+  }
+
+  void _setFromAyah(int ayah) {
+    setState(() {
+      _ayahFrom = ayah;
+      if (_surahFrom == _surahTo && _ayahTo < ayah) _ayahTo = ayah;
     });
   }
 
   void _setToAyah(int ayah) {
-    setState(() => _ayahTo = ayah);
+    setState(
+      () => _ayahTo = _surahFrom == _surahTo && ayah < _ayahFrom
+          ? _ayahFrom
+          : ayah,
+    );
+  }
+
+  void _setFullSurah(bool value) {
+    setState(() {
+      _fullSurah = value;
+      if (value) {
+        _surahTo = _surahFrom;
+        _ayahFrom = 1;
+        _ayahTo = _catalog.ayahCountOf(_surahFrom);
+      }
+    });
   }
 
   void _submit() {
+    final fromMax = _catalog.ayahCountOf(_surahFrom);
+    final toMax = _catalog.ayahCountOf(_surahTo);
+    if (_surahFrom > _surahTo ||
+        _ayahFrom < 1 ||
+        _ayahFrom > fromMax ||
+        _ayahTo < 1 ||
+        _ayahTo > toMax ||
+        (_surahFrom == _surahTo && _ayahFrom > _ayahTo) ||
+        (_fullSurah &&
+            (_surahFrom != _surahTo ||
+                _ayahFrom != 1 ||
+                _ayahTo != fromMax))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى اختيار نطاق آيات صحيح')),
+      );
+      return;
+    }
     Navigator.of(context).pop(<String, dynamic>{
       'type': _type,
       'surah_from': _surahFrom,
@@ -612,6 +662,15 @@ class _HifdEntrySheetState extends State<HifdEntrySheet> {
                 onToSurah: _setToSurah,
               ),
               const SizedBox(height: AppSpacing.md),
+              CheckboxListTile(
+                value: _fullSurah,
+                onChanged: (value) => _setFullSurah(value ?? false),
+                title: const Text('سورة كاملة'),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.trailing,
+                dense: true,
+              ),
+              const SizedBox(height: AppSpacing.xs),
               _RangeRow(
                 fromLabel: 'من آية',
                 toLabel: 'إلى آية',
@@ -619,9 +678,10 @@ class _HifdEntrySheetState extends State<HifdEntrySheet> {
                 surahTo: _surahTo,
                 ayahFrom: _ayahFrom,
                 ayahTo: _ayahTo,
-                onFromAyah: (v) => setState(() => _ayahFrom = v),
+                onFromAyah: _setFromAyah,
                 onToAyah: _setToAyah,
                 pickSurahs: false,
+                ayahControlsEnabled: !_fullSurah,
               ),
               const SizedBox(height: AppSpacing.md),
               _RangePreview(
@@ -673,6 +733,7 @@ class _RangeRow extends StatelessWidget {
     this.onFromSurah,
     this.onToSurah,
     this.pickSurahs = true,
+    this.ayahControlsEnabled = true,
   });
 
   final String fromLabel;
@@ -686,6 +747,7 @@ class _RangeRow extends StatelessWidget {
   final ValueChanged<int>? onFromAyah;
   final ValueChanged<int>? onToAyah;
   final bool pickSurahs;
+  final bool ayahControlsEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -700,6 +762,7 @@ class _RangeRow extends StatelessWidget {
             surah: surahFrom,
             ayah: ayahFrom ?? 1,
             onChanged: onFromAyah!,
+            enabled: ayahControlsEnabled,
           );
 
     final toField = pickSurahs
@@ -709,6 +772,7 @@ class _RangeRow extends StatelessWidget {
             surah: surahTo,
             ayah: ayahTo ?? 1,
             onChanged: onToAyah!,
+            enabled: ayahControlsEnabled,
           );
 
     return LayoutBuilder(
@@ -779,12 +843,14 @@ class _AyahField extends StatelessWidget {
     required this.surah,
     required this.ayah,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final String label;
   final int surah;
   final int ayah;
   final ValueChanged<int> onChanged;
+  final bool enabled;
 
   Future<void> _open(BuildContext context) async {
     final max = SurahCatalog.instance.ayahCountOf(surah);
@@ -806,12 +872,18 @@ class _AyahField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppPickerField(
-      label: label,
-      value: '$ayah',
-      isPlaceholder: false,
-      icon: Iconsax.document,
-      onTap: () => _open(context),
+    return IgnorePointer(
+      ignoring: !enabled,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.55,
+        child: AppPickerField(
+          label: label,
+          value: '$ayah',
+          isPlaceholder: false,
+          icon: Iconsax.document,
+          onTap: enabled ? () => _open(context) : () {},
+        ),
+      ),
     );
   }
 }
@@ -874,95 +946,132 @@ class _RangePreview extends StatelessWidget {
   }
 }
 
-class _SurahPickerSheet extends StatelessWidget {
+class _SurahPickerSheet extends StatefulWidget {
   const _SurahPickerSheet({required this.selected, required this.onSelect});
 
   final int selected;
   final ValueChanged<int> onSelect;
 
   @override
+  State<_SurahPickerSheet> createState() => _SurahPickerSheetState();
+}
+
+class _SurahPickerSheetState extends State<_SurahPickerSheet> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
     final catalog = SurahCatalog.instance;
-    final surahs = catalog.surahs;
+    final query = _query.trim();
+    final surahs = catalog.surahs
+        .where((surah) => surah.name.contains(query))
+        .toList();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.md,
-            ),
-            itemCount: surahs.length,
-            itemBuilder: (context, index) {
-              final surah = surahs[index];
-              final isSelected = surah.number == selected;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: Material(
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Colors.transparent,
-                  borderRadius: AppRadius.allMd,
-                  child: InkWell(
-                    onTap: () => onSelect(surah.number),
-                    borderRadius: AppRadius.allMd,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.lg,
-                        vertical: AppSpacing.md,
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 32,
-                            child: Text(
-                              '${surah.number}',
-                              style: Theme.of(context).textTheme.labelMedium
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Text(
-                              surah.name,
-                              textDirection: TextDirection.rtl,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.quranSurahName.copyWith(
-                                fontSize: 17,
-                                fontFamilyFallback: AppTypography.quranFallback,
-                                color: isSelected
-                                    ? Theme.of(
-                                        context,
-                                      ).colorScheme.onPrimaryContainer
-                                    : Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            '${surah.numberOfAyahs} آية',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            0,
+            AppSpacing.lg,
+            AppSpacing.md,
           ),
+          child: TextField(
+            textDirection: TextDirection.rtl,
+            textAlign: TextAlign.right,
+            decoration: const InputDecoration(
+              hintText: 'ابحث باسم السورة',
+              prefixIcon: Icon(Iconsax.search_normal),
+            ),
+            onChanged: (value) => setState(() => _query = value),
+          ),
+        ),
+        Expanded(
+          child: surahs.isEmpty
+              ? const Center(child: Text('لا توجد سورة بهذا الاسم'))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                  ),
+                  itemCount: surahs.length,
+                  itemBuilder: (context, index) {
+                    final surah = surahs[index];
+                    final isSelected = surah.number == widget.selected;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                      child: Material(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : Colors.transparent,
+                        borderRadius: AppRadius.allMd,
+                        child: InkWell(
+                          onTap: () => widget.onSelect(surah.number),
+                          borderRadius: AppRadius.allMd,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.lg,
+                              vertical: AppSpacing.md,
+                            ),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 32,
+                                  child: Text(
+                                    '${surah.number}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    surah.name,
+                                    textDirection: TextDirection.rtl,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTypography.quranSurahName
+                                        .copyWith(
+                                          fontSize: 17,
+                                          fontFamilyFallback:
+                                              AppTypography.quranFallback,
+                                          color: isSelected
+                                              ? Theme.of(
+                                                  context,
+                                                ).colorScheme.onPrimaryContainer
+                                              : Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurface,
+                                        ),
+                                  ),
+                                ),
+                                Text(
+                                  '${surah.numberOfAyahs} آية',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
       ],
     );

@@ -29,6 +29,9 @@ class HifdEntry {
   /// 3 = ممتاز, 2 = جيد, 1 = ضعيف.
   final int grade;
 
+  bool isFullSurah(int lastAyah) =>
+      surahFrom == surahTo && ayahFrom == 1 && ayahTo == lastAyah;
+
   Map<String, dynamic> toJson() => {
     if (id != null) 'id': id,
     'student_id': studentId,

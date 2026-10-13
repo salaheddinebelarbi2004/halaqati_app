@@ -16,6 +16,9 @@ class Attendance {
   final String studentId;
   final DateTime date;
 
+  static bool countsAsAttendance(String status) =>
+      status == 'present' || status == 'late';
+
   Map<String, dynamic> toJson() => {
     if (id != null) 'id': id,
     'student_id': studentId,

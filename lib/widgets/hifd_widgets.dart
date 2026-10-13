@@ -115,12 +115,14 @@ class HifdEntryCard extends StatelessWidget {
   const HifdEntryCard({
     super.key,
     required this.entry,
+    this.studentName,
     this.onTap,
     this.showDate = false,
     this.dateLabel,
   });
 
   final HifdEntry entry;
+  final String? studentName;
   final VoidCallback? onTap;
   final bool showDate;
   final String? dateLabel;
@@ -169,6 +171,15 @@ class HifdEntryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (studentName != null)
+                      Text(
+                        studentName!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
                     Text(
                       range,
                       textDirection: TextDirection.rtl,
@@ -227,17 +238,25 @@ class HifdProgressCard extends StatelessWidget {
     required this.studentName,
     required this.entries,
     this.onTap,
+    this.attendanceStatus,
     this.emptyHint = 'لم يُسجَّل تحفيظ بعد',
   });
 
   final String studentName;
   final List<HifdEntry> entries;
   final VoidCallback? onTap;
+  final String? attendanceStatus;
   final String emptyHint;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final statusLabel = attendanceStatus == null
+        ? 'لم يُسجّل'
+        : AttendanceStatus.label(attendanceStatus!);
+    final statusColor = attendanceStatus == null
+        ? Theme.of(context).colorScheme.outline
+        : AttendanceStatus.color(attendanceStatus!);
 
     if (entries.isEmpty) {
       return AppCard(
@@ -265,11 +284,22 @@ class HifdProgressCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    emptyHint,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          emptyHint,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      AppBadge(
+                        label: statusLabel,
+                        color: statusColor,
+                        dense: true,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -312,10 +342,20 @@ class HifdProgressCard extends StatelessWidget {
                   ),
                 ),
               ),
-              AppBadge(
-                label: HifdGrade.label(bestGrade),
-                color: HifdGrade.color(bestGrade),
-                dense: true,
+              Wrap(
+                spacing: AppSpacing.xs,
+                children: [
+                  AppBadge(
+                    label: statusLabel,
+                    color: statusColor,
+                    dense: true,
+                  ),
+                  AppBadge(
+                    label: HifdGrade.label(bestGrade),
+                    color: HifdGrade.color(bestGrade),
+                    dense: true,
+                  ),
+                ],
               ),
             ],
           ),

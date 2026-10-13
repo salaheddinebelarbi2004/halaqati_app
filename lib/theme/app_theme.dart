@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import 'app_colors.dart';
 import 'app_spacing.dart';
 import 'app_typography.dart';
@@ -100,6 +101,7 @@ class AppTheme {
 
   static ThemeData _build(ColorScheme scheme, Brightness brightness) {
     final isLight = brightness == Brightness.light;
+
     final textTheme = AppTypography.textTheme(
       scheme.onSurface,
       scheme.onSurfaceVariant,
@@ -117,6 +119,7 @@ class AppTheme {
           : AppColors.darkBackground,
       fontFamily: AppTypography.uiFont,
       textTheme: textTheme,
+
       // ------------------------------------------------------------ buttons
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -127,6 +130,7 @@ class AppTheme {
           elevation: 0,
         ),
       ),
+
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           minimumSize: const Size(0, AppSizes.buttonHeight),
@@ -138,6 +142,7 @@ class AppTheme {
           foregroundColor: scheme.onPrimary,
         ),
       ),
+
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(0, AppSizes.buttonHeight),
@@ -148,6 +153,7 @@ class AppTheme {
           foregroundColor: scheme.onSurface,
         ),
       ),
+
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           textStyle: AppTypography.labelLarge,
@@ -158,12 +164,14 @@ class AppTheme {
           ),
         ),
       ),
+
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
           foregroundColor: scheme.onSurfaceVariant,
           minimumSize: const Size(AppSizes.minTapTarget, AppSizes.minTapTarget),
         ),
       ),
+
       // ------------------------------------------------------------- inputs
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -196,7 +204,9 @@ class AppTheme {
         focusedErrorBorder: _inputBorder(scheme.error, width: 1.6),
         disabledBorder: _inputBorder(scheme.outlineVariant),
       ),
+
       dropdownMenuTheme: const DropdownMenuThemeData(),
+
       // -------------------------------------------------------------- cards
       cardTheme: CardThemeData(
         color: scheme.surface,
@@ -208,11 +218,13 @@ class AppTheme {
           side: BorderSide(color: scheme.outline),
         ),
       ),
+
       dividerTheme: DividerThemeData(
         color: scheme.outline,
         thickness: 1,
         space: 1,
       ),
+
       // -------------------------------------------------------------- chips
       chipTheme: ChipThemeData(
         backgroundColor: scheme.surfaceContainer,
@@ -226,6 +238,7 @@ class AppTheme {
         ),
         showCheckmark: false,
       ),
+
       // ------------------------------------------------------------- others
       appBarTheme: AppBarTheme(
         backgroundColor: isLight
@@ -245,6 +258,7 @@ class AppTheme {
             ? SystemUiOverlayStyle.dark
             : SystemUiOverlayStyle.light,
       ),
+
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
@@ -254,6 +268,7 @@ class AppTheme {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStatePropertyAll(AppTypography.labelSmall),
       ),
+
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
@@ -267,6 +282,7 @@ class AppTheme {
           ),
         ),
       ),
+
       dialogTheme: DialogThemeData(
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
@@ -286,6 +302,7 @@ class AppTheme {
           color: scheme.onSurfaceVariant,
         ),
       ),
+
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: scheme.inverseSurface,
@@ -296,6 +313,7 @@ class AppTheme {
         insetPadding: const EdgeInsets.all(AppSpacing.lg),
         elevation: 0,
       ),
+
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
@@ -309,6 +327,7 @@ class AppTheme {
         ),
         trackOutlineColor: WidgetStatePropertyAll(scheme.outline),
       ),
+
       sliderTheme: SliderThemeData(
         activeTrackColor: scheme.primary,
         inactiveTrackColor: scheme.surfaceContainerHighest,
@@ -316,6 +335,7 @@ class AppTheme {
         overlayColor: scheme.primary.withValues(alpha: 0.1),
         trackHeight: 4,
       ),
+
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           textStyle: WidgetStatePropertyAll(AppTypography.labelMedium),
@@ -325,11 +345,13 @@ class AppTheme {
           ),
         ),
       ),
+
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: scheme.primary,
         linearTrackColor: scheme.surfaceContainerHighest,
         circularTrackColor: scheme.surfaceContainerHighest,
       ),
+
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
           color: scheme.inverseSurface,
@@ -339,6 +361,7 @@ class AppTheme {
           color: scheme.onInverseSurface,
         ),
       ),
+
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: scheme.primary,
         foregroundColor: scheme.onPrimary,
@@ -348,6 +371,7 @@ class AppTheme {
         highlightElevation: 0,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.allLg),
       ),
+
       listTileTheme: ListTileThemeData(
         contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         titleTextStyle: AppTypography.titleMedium.copyWith(
@@ -359,11 +383,14 @@ class AppTheme {
         iconColor: scheme.onSurfaceVariant,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.allMd),
       ),
+
       splashFactory: InkSparkle.splashFactory,
+
+      // ----------------------------------------------------- page transitions
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: <TargetPlatform, PageTransitionsBuilder>{
           TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: FadeForwardsPageTransitionsBuilder(),
           TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
           TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
           TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
@@ -372,9 +399,10 @@ class AppTheme {
     );
   }
 
-  static OutlineInputBorder _inputBorder(Color color, {double width = 1}) =>
-      OutlineInputBorder(
-        borderRadius: AppRadius.allMd,
-        borderSide: BorderSide(color: color, width: width),
-      );
+  static OutlineInputBorder _inputBorder(Color color, {double width = 1}) {
+    return OutlineInputBorder(
+      borderRadius: AppRadius.allMd,
+      borderSide: BorderSide(color: color, width: width),
+    );
+  }
 }

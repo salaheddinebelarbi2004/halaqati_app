@@ -66,3 +66,6 @@ supabase/config.toml
 .vscode/
 tmp/
 temp/
+
+# Local changes file
+changes2.md

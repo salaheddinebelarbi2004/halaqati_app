@@ -5,10 +5,7 @@ import 'package:halaqati/models/settings.dart';
 import 'package:halaqati/models/student.dart';
 import 'package:halaqati/services/ranking_service.dart';
 
-/// These tests exist because the denominators are easy to "fix" by accident.
-/// `total_days` is NOT the session count and NOT the number of present days:
-/// it is the number of distinct days on which the student has any row that is
-/// not `excused`, so `absent` and `late` both count against them.
+/// Denominators include only explicitly recorded, non-excused sessions.
 void main() {
   final start = DateTime(2025, 1, 1);
   final end = DateTime(2025, 1, 31);
@@ -56,28 +53,34 @@ void main() {
     (e) => (e['student'] as Student).id == id,
   );
 
-  group('total_days excludes excused days but not absent ones', () {
-    test('absent and late both count as a session', () {
-      final result = rankings(
-        attendance: [att('a', 1, 'present'), att('a', 2, 'absent')],
-      );
-      final row = entryAt(result, 'hodor_ranking', 'a');
-      expect(row['total_days'], 2);
-      expect(row['present'], 1);
-      expect(row['hodor_score'], closeTo(50, 0.001));
-    });
-
-    test('an excused day is not a session', () {
+  group('attendance totals', () {
+    test('present and late count as attendance; absent counts against it', () {
       final result = rankings(
         attendance: [
           att('a', 1, 'present'),
-          att('a', 2, 'present'),
-          att('a', 3, 'excused'),
+          att('a', 2, 'late'),
+          att('a', 3, 'absent'),
+          att('a', 4, 'excused'),
         ],
       );
       final row = entryAt(result, 'hodor_ranking', 'a');
-      expect(row['total_days'], 2);
-      expect(row['present'], 2);
+      expect(row['total_days'], 3);
+      expect(row['present'], 1);
+      expect(row['late'], 1);
+      expect(row['attended'], 2);
+      expect(row['absent'], 1);
+      expect(row['excused'], 1);
+      expect(row['hodor_score'], closeTo(200 / 3, 0.001));
+    });
+
+    test('missing rows are not inferred as absences', () {
+      final result = rankings(
+        attendance: [att('a', 1, 'present'), att('a', 2, 'excused')],
+      );
+      final row = entryAt(result, 'hodor_ranking', 'a');
+      expect(row['total_days'], 1);
+      expect(row['present'], 1);
+      expect(row['absent'], 0);
       expect(row['hodor_score'], 100);
     });
 
@@ -89,20 +92,49 @@ void main() {
       expect(row['avg_grade'], 0);
       expect(row['hifd_score'], 0);
       expect(row['overall_score'], 0);
+      expect(row['status_counts'], isEmpty);
     });
   });
 
-  group('total_sessions counts every day in the period', () {
-    test('including excused days and other students', () {
+  group('report aggregation', () {
+    test('deduplicates dates and retains other status categories', () {
       final result = rankings(
         attendance: [
           att('a', 1, 'present'),
           att('a', 1, 'absent'),
+          att('a', 2, 'sick'),
           att('s', 1, 'excused'),
           att('s', 2, 'present'),
         ],
       );
       expect(result['total_sessions'], 2);
+      final row = entryAt(result, 'hodor_ranking', 'a');
+      expect(row['present'], 1);
+      expect(row['status_counts']['sick'], 1);
+      expect(row['expected_sessions'], 2);
+    });
+
+    test('includes chronological Hifdh details, sessions, and surahs', () {
+      final result = rankings(
+        hifdEntries: [
+          HifdEntry(
+            studentId: 'a',
+            date: DateTime(2025, 1, 3),
+            type: 'muraja3a',
+            surahFrom: 2,
+            ayahFrom: 4,
+            surahTo: 2,
+            ayahTo: 8,
+            grade: 2,
+          ),
+          hifd('a', 1, 3),
+        ],
+      );
+      final row = entryAt(result, 'hifd_ranking', 'a');
+      expect(row['hifdh_records'], 2);
+      expect(row['hifdh_sessions'], 2);
+      expect(row['surahs'], {1, 2});
+      expect((row['hifd_ranges'] as List).first['date'], '2025-01-01');
     });
 
     test('ignoring rows outside the period', () {

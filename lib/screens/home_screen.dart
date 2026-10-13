@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
 import '../core/app_responsive.dart';
 import '../core/providers.dart';
+import '../models/attendance.dart';
 import '../models/hifd_entry.dart';
 import '../models/student.dart';
 import '../models/teacher.dart';
@@ -16,6 +17,24 @@ import '../widgets/app_scaffold.dart';
 import '../widgets/app_states.dart';
 import '../widgets/hifd_widgets.dart';
 import '../widgets/theme_toggle.dart';
+
+List<Student> sortStudentsByAttendance(
+  List<Student> students,
+  Map<String, String> statuses,
+) {
+  final indexed = students.indexed.toList()
+    ..sort((a, b) {
+      final aAttended = Attendance.countsAsAttendance(
+        statuses[a.$2.id] ?? '',
+      );
+      final bAttended = Attendance.countsAsAttendance(
+        statuses[b.$2.id] ?? '',
+      );
+      if (aAttended != bAttended) return aAttended ? -1 : 1;
+      return a.$1.compareTo(b.$1);
+    });
+  return [for (final item in indexed) item.$2];
+}
 
 /// Teacher dashboard.
 ///
@@ -37,13 +56,20 @@ class HomeScreen extends ConsumerWidget {
     final attendance = ref.watch(attendanceProvider(today));
     final hifd = ref.watch(hifdEntriesProvider(today));
 
-    final todayAttendance = {
+    final Map<String, String> todayAttendance = {
       for (final a in attendance.valueOrNull ?? const []) a.studentId: a.status,
     };
     final todayHifd = hifd.valueOrNull ?? const <HifdEntry>[];
+    final studentsById = {
+      for (final student in students)
+        if (student.id != null) student.id!: student,
+    };
 
-    final presentCount = todayAttendance.values
-        .where((s) => s == 'present')
+    final presentCount = students
+        .where((s) => Attendance.countsAsAttendance(todayAttendance[s.id] ?? ''))
+        .length;
+    final lateCount = students
+        .where((s) => todayAttendance[s.id] == 'late')
         .length;
     final unmarkedCount = students
         .where((s) => todayAttendance[s.id] == null)
@@ -68,6 +94,7 @@ class HomeScreen extends ConsumerWidget {
                 const SizedBox(height: AppSpacing.xl),
                 _TodaySummaryCard(
                   present: presentCount,
+                  late: lateCount,
                   unmarked: unmarkedCount,
                   total: students.length,
                   hifdCount: todayHifd.length,
@@ -113,7 +140,8 @@ class HomeScreen extends ConsumerWidget {
                     ),
                   ),
                   _StudentProgressList(
-                    students: students,
+                    students: sortStudentsByAttendance(students, todayAttendance),
+                    attendanceByStudent: todayAttendance,
                     entriesByStudent: _groupHifdByStudent(todayHifd),
                     onTap: () => _open(context, '/students'),
                     limit: students.length > 3 ? 3 : students.length,
@@ -130,7 +158,13 @@ class HomeScreen extends ConsumerWidget {
                       padding: const EdgeInsets.only(
                         bottom: AppSpacing.cardGap,
                       ),
-                      child: HifdEntryCard(entry: entry, showDate: false),
+                      child: HifdEntryCard(
+                        entry: entry,
+                        studentName:
+                            studentsById[entry.studentId]?.fullName ??
+                            'طالب غير موجود',
+                        showDate: false,
+                      ),
                     ),
                 ],
                 const SizedBox(height: AppSpacing.sectionGap),
@@ -216,6 +250,7 @@ class _TopBar extends StatelessWidget {
 class _TodaySummaryCard extends StatelessWidget {
   const _TodaySummaryCard({
     required this.present,
+    required this.late,
     required this.unmarked,
     required this.total,
     required this.hifdCount,
@@ -224,6 +259,7 @@ class _TodaySummaryCard extends StatelessWidget {
   });
 
   final int present;
+  final int late;
   final int unmarked;
   final int total;
   final int hifdCount;
@@ -278,6 +314,15 @@ class _TodaySummaryCard extends StatelessWidget {
                         '$unmarked لم يُسجَّل بعد',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.tertiary,
+                        ),
+                      ),
+                    ],
+                    if (late > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '$late متأخر ضمن الحضور',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.statusLate,
                         ),
                       ),
                     ],
@@ -426,11 +471,13 @@ class _StudentProgressList extends StatelessWidget {
   const _StudentProgressList({
     required this.students,
     required this.entriesByStudent,
+    required this.attendanceByStudent,
     required this.onTap,
     this.limit = 4,
   });
   final List<Student> students;
   final Map<String?, List<HifdEntry>> entriesByStudent;
+  final Map<String, String> attendanceByStudent;
   final VoidCallback onTap;
   final int limit;
 
@@ -444,6 +491,7 @@ class _StudentProgressList extends StatelessWidget {
           HifdProgressCard(
             studentName: preview[i].fullName,
             entries: entriesByStudent[preview[i].id] ?? const <HifdEntry>[],
+            attendanceStatus: attendanceByStudent[preview[i].id],
             onTap: onTap,
           ),
         ],

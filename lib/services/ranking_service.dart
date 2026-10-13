@@ -3,86 +3,95 @@ import '../models/attendance.dart';
 import '../models/hifd_entry.dart';
 import '../models/settings.dart';
 import '../models/student.dart';
+import 'dart:math' as math;
 
-/// Turns raw rows into the three rankings the reports screen shows.
-///
-/// Pure Dart on purpose: the old implementation issued four queries *per
-/// student*, which is free against SQLite and ruinous over the network. The
-/// caller now fetches the period's attendance and memorization rows once and
-/// hands them in.
-///
-/// The formulas are unchanged:
-///
-/// ```
-/// hodorScore   = presentCount / totalDays * 100
-/// hifdScore    = avgGrade / 3 * 100
-/// overallScore = hodorWeight * hodorScore + hifdWeight * hifdScore
-/// ```
-///
-/// [totalDays] is *not* the session count. It is the number of distinct days
-/// on which this student has a row that is not `excused`; `excused` days are
-/// deliberately excluded from the denominator but `absent` and `late` days are
-/// not. `total_sessions`, by contrast, counts every distinct day in the period
-/// across all students and all statuses.
+/// Aggregates saved attendance and Hifdh records for reports.
 class RankingService {
   const RankingService._();
 
-  static Map<String, dynamic> computeRankings({
-    required List<Student> students,
-    required List<Attendance> attendance,
-    required List<HifdEntry> hifdEntries,
-    required AppSettings settings,
-    required DateTime start,
-    required DateTime end,
-  }) {
-    final presentByStudent = _presentCounts(attendance, start, end);
-    final daysByStudent = _sessionDays(attendance, start, end);
-    final gradeByStudent = _averageGrades(hifdEntries, start, end);
+ /// Hifd score = 70% quality (avg grade) + 30% volume (records vs. the
+/// most active student in the same period). Prevents "1 perfect record"
+/// from beating a student who memorised a lot.
+static const double _qualityWeight = 0.7;
+static const double _volumeWeight = 0.3;
 
-    var hodorRanking = <Map<String, dynamic>>[];
-    var hifdRanking = <Map<String, dynamic>>[];
-    var overallRanking = <Map<String, dynamic>>[];
+static Map<String, dynamic> computeRankings({
+  required List<Student> students,
+  required List<Attendance> attendance,
+  required List<HifdEntry> hifdEntries,
+  required AppSettings settings,
+  required DateTime start,
+  required DateTime end,
+}) {
+  final attendanceByStudent = _attendanceSummary(attendance, start, end);
+  final hifdhByStudent = _hifdhSummary(hifdEntries, start, end);
+  final active = students.where((s) => s.active).toList();
 
-    for (final student in students.where((s) => s.active)) {
-      final presentCount = presentByStudent[student.id] ?? 0;
-      final totalDays = daysByStudent[student.id] ?? 0;
-      final avgGrade = gradeByStudent[student.id] ?? 0.0;
+  final maxRecords = active.fold<int>(
+    0,
+    (m, s) => math.max(m, (hifdhByStudent[s.id]?['hifdh_records'] as int?) ?? 0),
+  );
 
-      final hodorScore = totalDays > 0 ? (presentCount / totalDays) * 100 : 0.0;
-      final hifdScore = avgGrade > 0 ? (avgGrade / 3) * 100 : 0.0;
-      final overallScore =
-          (settings.hodorWeight * hodorScore) +
-          (settings.hifdWeight * hifdScore);
+  final rankings = <Map<String, dynamic>>[];
+  for (final student in active) {
+    final att = attendanceByStudent[student.id] ?? _emptyAttendance();
+    final hifdh = hifdhByStudent[student.id] ?? _emptyHifdh();
+    final expected = att['expected_sessions'] as int;
+    final attended = att['attended'] as int;
+    final records = hifdh['hifdh_records'] as int;
+    final avgGrade = hifdh['avg_grade'] as double;
 
-      final entry = <String, dynamic>{
-        'student': student,
-        'hodor_score': hodorScore,
-        'hifd_score': hifdScore,
-        'overall_score': overallScore,
-        'present': presentCount,
-        'total_days': totalDays,
-        'avg_grade': avgGrade,
-      };
+    final hodorScore = expected == 0 ? 0.0 : attended / expected * 100;
+    final quality = avgGrade == 0 ? 0.0 : avgGrade / 3 * 100;
+    final volume = maxRecords == 0 ? 0.0 : records / maxRecords * 100;
+    final hifdScore = records == 0
+        ? 0.0
+        : quality * _qualityWeight + volume * _volumeWeight;
 
-      hodorRanking.add(entry);
-      hifdRanking.add(entry);
-      overallRanking.add(entry);
-    }
-
-    hodorRanking = _sorted(hodorRanking, 'hodor_score');
-    hifdRanking = _sorted(hifdRanking, 'hifd_score');
-    overallRanking = _sorted(overallRanking, 'overall_score');
-
-    return {
-      'hodor_ranking': hodorRanking,
-      'hifd_ranking': hifdRanking,
-      'overall_ranking': overallRanking,
-      'total_sessions': _distinctDates(attendance, start, end).length,
-    };
+    rankings.add({
+      'student': student,
+      ...att,
+      ...hifdh,
+      'hodor_score': hodorScore,
+      'attendance_rate': hodorScore,
+      'hifd_quality': quality,
+      'hifd_volume': volume,
+      'hifd_score': hifdScore,
+      'overall_score':
+          settings.hodorWeight * hodorScore + settings.hifdWeight * hifdScore,
+      'total_days': expected,
+    });
   }
 
-  /// Per-student summary plus the memorization history rows the detail screen
-  /// lists.
+  final hodorRanking = _sorted(rankings,
+      scoreKey: 'hodor_score',
+      secondaryKeys: const ['expected_sessions', 'attended', 'hifdh_records']);
+  final hifdRanking = _sorted(rankings,
+      scoreKey: 'hifd_score',
+      secondaryKeys: const ['hifdh_records', 'hifdh_sessions']);
+  final overallRanking = _sorted(rankings,
+      scoreKey: 'overall_score',
+      secondaryKeys: const ['expected_sessions', 'attended', 'hifdh_records']);
+
+  // Same map objects are shared, so each student carries all three ranks.
+  for (var i = 0; i < hodorRanking.length; i++) {
+    hodorRanking[i]['hodor_rank'] = i + 1;
+  }
+  for (var i = 0; i < hifdRanking.length; i++) {
+    hifdRanking[i]['hifd_rank'] = i + 1;
+  }
+  for (var i = 0; i < overallRanking.length; i++) {
+    overallRanking[i]['overall_rank'] = i + 1;
+  }
+
+  return {
+    'hodor_ranking': hodorRanking,
+    'hifd_ranking': hifdRanking,
+    'overall_ranking': overallRanking,
+    'total_sessions': _distinctSessionDates(attendance, start, end).length,
+  };
+}
+  /// Student-level figures and chronological Hifdh history for the period.
   static Map<String, dynamic> studentReport({
     required Student? student,
     required List<Attendance> attendance,
@@ -92,114 +101,202 @@ class RankingService {
     required DateTime end,
   }) {
     final id = student?.id;
-    final presentCount = id == null
-        ? 0
-        : _presentCounts(attendance, start, end)[id] ?? 0;
-    final totalDays = id == null
-        ? 0
-        : _sessionDays(attendance, start, end)[id] ?? 0;
-    final avgGrade = id == null
+    final attendanceSummary = id == null
+        ? _emptyAttendance()
+        : _attendanceSummary(attendance, start, end)[id] ?? _emptyAttendance();
+    final hifdhSummary = id == null
+        ? _emptyHifdh()
+        : _hifdhSummary(hifdEntries, start, end)[id] ?? _emptyHifdh();
+    final hodorScore = attendanceSummary['expected_sessions'] == 0
         ? 0.0
-        : _averageGrades(hifdEntries, start, end)[id] ?? 0.0;
-
-    final hodorScore = totalDays > 0 ? (presentCount / totalDays) * 100 : 0.0;
-    final hifdScore = avgGrade > 0 ? (avgGrade / 3) * 100 : 0.0;
-
-    final ranges = id == null
-        ? <Map<String, dynamic>>[]
-        : (hifdEntries
-                  .where(
-                    (e) => e.studentId == id && dateInRange(e.date, start, end),
-                  )
-                  .toList()
-                ..sort((a, b) => a.date.compareTo(b.date)))
-              .map(_hifdRange)
-              .toList();
+        : (attendanceSummary['attended'] as int) /
+              (attendanceSummary['expected_sessions'] as int) *
+              100;
+    final avgGrade = hifdhSummary['avg_grade'] as double;
+    final hifdScore = avgGrade == 0 ? 0.0 : avgGrade / 3 * 100;
 
     return {
       'student': student,
+      ...attendanceSummary,
+      ...hifdhSummary,
       'hodor_score': hodorScore,
+      'attendance_rate': hodorScore,
       'hifd_score': hifdScore,
       'overall_score':
-          (settings.hodorWeight * hodorScore) +
-          (settings.hifdWeight * hifdScore),
-      'present': presentCount,
-      'total_days': totalDays,
-      'avg_grade': avgGrade,
-      'hifd_ranges': ranges,
+          settings.hodorWeight * hodorScore + settings.hifdWeight * hifdScore,
+      'total_days': attendanceSummary['expected_sessions'],
     };
   }
 
-  // ------------------------------------------------------------- aggregation
+  static Map<String, dynamic> _emptyAttendance() => {
+    'present': 0,
+    'late': 0,
+    'attended': 0,
+    'absent': 0,
+    'excused': 0,
+    'expected_sessions': 0,
+    'status_counts': <String, int>{},
+  };
 
-  /// `student id -> number of 'present' rows in the period`.
-  static Map<String?, int> _presentCounts(
+  static Map<String, dynamic> _emptyHifdh() => {
+  'avg_grade': 0.0,
+  'hifdh_records': 0,
+  'hifdh_sessions': 0,
+  'hifdh_ayahs': 0,
+  'grade_counts': <int, int>{},
+  'type_counts': <String, int>{},
+  'last_hifdh_date': null,
+  'surahs': <int>[],
+  'hifd_ranges': <Map<String, dynamic>>[],
+};
+
+  /// A single saved status per student/day; conflicting duplicate days resolve
+  /// deterministically, while the database's unique key normally prevents them.
+  static Map<String, Map<String, dynamic>> _attendanceSummary(
     List<Attendance> rows,
     DateTime start,
     DateTime end,
   ) {
-    final counts = <String?, int>{};
+    final statusByDay = <String, Map<String, String>>{};
     for (final row in rows) {
-      if (row.status != 'present') continue;
-      if (!dateInRange(row.date, start, end)) continue;
-      counts.update(row.studentId, (v) => v + 1, ifAbsent: () => 1);
+      if (!dateInRange(row.date, start, end) || row.studentId.isEmpty) continue;
+      final day = dateOnly(row.date);
+      final statuses = statusByDay.putIfAbsent(
+        row.studentId,
+        () => <String, String>{},
+      );
+      final current = statuses[day];
+      if (current == null || _statusOrder(row.status) < _statusOrder(current)) {
+        statuses[day] = row.status;
+      }
     }
-    return counts;
+
+    return {
+      for (final studentEntry in statusByDay.entries)
+        studentEntry.key: _summarizeStatuses(studentEntry.value.values),
+    };
   }
 
-  /// `student id -> distinct days with a non-excused row in the period`.
-  static Map<String?, int> _sessionDays(
-    List<Attendance> rows,
-    DateTime start,
-    DateTime end,
-  ) {
-    final days = <String?, Set<String>>{};
-    for (final row in rows) {
-      if (row.status == 'excused') continue;
-      if (!dateInRange(row.date, start, end)) continue;
-      (days[row.studentId] ??= <String>{}).add(dateOnly(row.date));
+  static Map<String, dynamic> _summarizeStatuses(Iterable<String> statuses) {
+    final counts = <String, int>{};
+    for (final status in statuses) {
+      counts.update(status, (count) => count + 1, ifAbsent: () => 1);
     }
-    return {for (final e in days.entries) e.key: e.value.length};
+    final present = counts['present'] ?? 0;
+    final late = counts['late'] ?? 0;
+    final expected = statuses.where((status) => status != 'excused').length;
+    return {
+      'present': present,
+      'late': late,
+      'attended': present + late,
+      'absent': counts['absent'] ?? 0,
+      'excused': counts['excused'] ?? 0,
+      'expected_sessions': expected,
+      'status_counts': counts,
+    };
   }
 
-  /// `student id -> mean grade over the period`, absent when there are no rows.
-  static Map<String?, double> _averageGrades(
+  static int _statusOrder(String status) => switch (status) {
+    'present' => 0,
+    'late' => 1,
+    'absent' => 2,
+    'excused' => 3,
+    _ => 4,
+  };
+
+  static Map<String, Map<String, dynamic>> _hifdhSummary(
     List<HifdEntry> rows,
     DateTime start,
     DateTime end,
   ) {
-    final totals = <String?, int>{};
-    final counts = <String?, int>{};
+    final byStudent = <String, List<HifdEntry>>{};
     for (final row in rows) {
-      if (!dateInRange(row.date, start, end)) continue;
-      totals.update(
-        row.studentId,
-        (v) => v + row.grade,
-        ifAbsent: () => row.grade,
-      );
-      counts.update(row.studentId, (v) => v + 1, ifAbsent: () => 1);
+      if (!dateInRange(row.date, start, end) || row.studentId.isEmpty) continue;
+      byStudent.putIfAbsent(row.studentId, () => <HifdEntry>[]).add(row);
     }
-    return {for (final e in totals.entries) e.key: e.value / counts[e.key]!};
+
+    return {
+      for (final studentEntry in byStudent.entries)
+        studentEntry.key: _summarizeHifdh(studentEntry.value),
+    };
   }
 
-  /// Every distinct day in the period, any student, any status.
-  static Set<String> _distinctDates(
+ static Map<String, dynamic> _summarizeHifdh(List<HifdEntry> entries) {
+  final ordered = entries.toList()
+    ..sort((a, b) {
+      final d = a.date.compareTo(b.date);
+      if (d != 0) return d;
+      final s = a.surahFrom.compareTo(b.surahFrom);
+      if (s != 0) return s;
+      return a.ayahFrom.compareTo(b.ayahFrom);
+    });
+  final surahs = <int>{
+    for (final e in ordered) e.surahFrom,
+    for (final e in ordered) e.surahTo,
+  }.toList()..sort();
+
+  final gradeCounts = <int, int>{};
+  final typeCounts = <String, int>{};
+  var ayahs = 0;
+  for (final e in ordered) {
+    gradeCounts.update(e.grade, (c) => c + 1, ifAbsent: () => 1);
+    typeCounts.update(e.type, (c) => c + 1, ifAbsent: () => 1);
+    // Exact for single-surah ranges. For ranges crossing surahs, plug in
+    // your surah ayah counts here if SurahCatalog exposes them.
+    if (e.surahFrom == e.surahTo) {
+      ayahs += math.max(0, e.ayahTo - e.ayahFrom + 1);
+    }
+  }
+
+  return {
+    'avg_grade':
+        ordered.fold<int>(0, (t, e) => t + e.grade) / ordered.length,
+    'hifdh_records': ordered.length,
+    'hifdh_sessions': ordered.map((e) => dateOnly(e.date)).toSet().length,
+    'hifdh_ayahs': ayahs,
+    'grade_counts': gradeCounts,
+    'type_counts': typeCounts,
+    'last_hifdh_date': dateOnly(ordered.last.date),
+    'surahs': surahs,
+    'hifd_ranges': ordered.map(_hifdRange).toList(),
+  };
+}
+  static Set<String> _distinctSessionDates(
     List<Attendance> rows,
     DateTime start,
     DateTime end,
   ) => {
     for (final row in rows)
-      if (dateInRange(row.date, start, end)) dateOnly(row.date),
+      if (row.status != 'excused' &&
+          row.studentId.isNotEmpty &&
+          dateInRange(row.date, start, end))
+        dateOnly(row.date),
   };
 
+  /// Fair ordering: score first, then more marked/attended sessions and
+  /// memorization records; student name and ID make ties deterministic.
   static List<Map<String, dynamic>> _sorted(
-    List<Map<String, dynamic>> entries,
-    String key,
-  ) =>
-      entries.toList()
-        ..sort((a, b) => (b[key] as double).compareTo(a[key] as double));
+    List<Map<String, dynamic>> entries, {
+    required String scoreKey,
+    required List<String> secondaryKeys,
+  }) =>
+      entries.toList()..sort((a, b) {
+        final scoreOrder =
+            (b[scoreKey] as double).compareTo(a[scoreKey] as double);
+        if (scoreOrder != 0) return scoreOrder;
+        for (final key in secondaryKeys) {
+          final order = (b[key] as int).compareTo(a[key] as int);
+          if (order != 0) return order;
+        }
+        final nameOrder = (a['student'] as Student).fullName.compareTo(
+          (b['student'] as Student).fullName,
+        );
+        if (nameOrder != 0) return nameOrder;
+        return ((a['student'] as Student).id ?? '').compareTo(
+          (b['student'] as Student).id ?? '',
+        );
+      });
 
-  /// Shape consumed by the detail screen's `_HifdRangeRow`.
   static Map<String, dynamic> _hifdRange(HifdEntry entry) => {
     'surah_from': entry.surahFrom,
     'ayah_from': entry.ayahFrom,

@@ -102,6 +102,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
 
     try {
       await ref.read(dataServiceProvider).saveAttendance(rows);
+      ref.invalidate(reportDataProvider);
       if (!mounted) return;
       setState(() {
         _editing = false;
