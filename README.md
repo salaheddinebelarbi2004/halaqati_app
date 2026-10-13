@@ -6,7 +6,7 @@ The backend is Supabase (Auth + Postgres + Realtime) with Row Level Security (RL
 ## Halaqati Preview
 
 <p align="center">
-  <img src="halaqati_showcase.png" alt="Halaqati App Preview" width="350" />
+  <img src="halaqati_showcase.png" alt="Halaqati App Preview" width="750" />
 </p>
 ## Quick Start
 
