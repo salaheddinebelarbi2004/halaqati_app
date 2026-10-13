@@ -3,6 +3,11 @@
 Halaqati is a production-oriented Flutter app for Quran teachers to manage a single halaqa: student roster, daily attendance, hifd tracking, rankings, and PDF reports.  
 The backend is Supabase (Auth + Postgres + Realtime) with Row Level Security (RLS) for tenant isolation.
 
+## Halaqati Preview
+
+<p align="center">
+  <img src="halaqati_showcase.png" alt="Halaqati App Preview" width="350" />
+</p>
 ## Quick Start
 
 ### Prerequisites
